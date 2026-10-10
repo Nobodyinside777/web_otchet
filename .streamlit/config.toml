@@ -1,0 +1,22 @@
+# Настройки Streamlit. Приложение работает только локально и офлайн.
+
+[server]
+# Слушаем только этот компьютер, снаружи приложение недоступно.
+address = "127.0.0.1"
+port = 8501
+# Браузер открывает run.bat, а не Streamlit.
+headless = true
+# Файлы до 200 МБ плюс запас (в мегабайтах).
+maxUploadSize = 250
+runOnSave = false
+
+[browser]
+serverAddress = "127.0.0.1"
+# Никакой телеметрии.
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[global]
+developmentMode = false

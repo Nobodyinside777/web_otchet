@@ -1,0 +1,7 @@
+streamlit>=1.40
+polars>=1.10
+python-calamine>=0.3
+pywin32>=306
+pytest>=8.0
+# only for tests: builds broken sample files
+openpyxl>=3.1
