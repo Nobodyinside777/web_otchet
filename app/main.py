@@ -11,14 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import ops  # noqa: E402
 from app.loader import LoadResult, load  # noqa: E402
-from app.schema import BY_CODE, DATE, LABELS, MEASURE, TEXT, Column  # noqa: E402
-from app.ui_filters import filters_button, reset_filters  # noqa: E402
+from app.schema import BY_CODE, Column  # noqa: E402
+from app.ui_table import current_view, reset_view, show_table  # noqa: E402
 from app.validate import FormatError, hidden_columns_message  # noqa: E402
 
-# Больше строк браузер показывает медленно. Итоги всё равно считаются по всем строкам.
-MAX_ROWS_ON_SCREEN = 100_000
-TABLE_HEIGHT = 600  # высота таблицы на странице, пикселей
 DEFAULT_TOTALS = ["revenue", "cost", "margin_rub", "margin_pct"]
+TABLE_HEIGHT = 600  # высота таблицы на странице, пикселей; кнопка «На весь экран» — над ней
 
 st.set_page_config(page_title="Прогноз выручки", layout="wide")
 
@@ -43,7 +41,7 @@ def load_uploaded(uploaded) -> LoadResult | None:
     bar.empty()
     st.session_state["loaded"] = {"file_id": uploaded.file_id, "result": result}
     # Фильтры и сортировка от прошлого файла к новому могут не подходить.
-    reset_filters()
+    reset_view()
     for key in [k for k in st.session_state if k.startswith("view_")]:
         del st.session_state[key]
     return result
@@ -65,30 +63,6 @@ def show_file_check(result: LoadResult) -> None:
         if result.info:
             st.markdown("**Пустые ячейки в суммах:**")
             st.markdown("\n".join(f"- {i}" for i in result.info))
-
-
-# ---------- таблица ----------
-
-
-def column_config(columns: list[Column]) -> dict:
-    """Как показывать колонки: даты без времени, доли в процентах, суммы с разрядами."""
-    config = {}
-    for col in columns:
-        if col.dtype == DATE:
-            config[col.label] = st.column_config.DateColumn(col.label, format="DD.MM.YYYY")
-        elif col.percent:
-            config[col.label] = st.column_config.NumberColumn(col.label, format="percent")
-        elif col.role == MEASURE:
-            config[col.label] = st.column_config.NumberColumn(col.label, format="localized")
-    return config
-
-
-def for_screen(df: pl.DataFrame, columns: list[Column]) -> pl.DataFrame:
-    """Таблица для показа: пустой текст вместо None и русские заголовки."""
-    text_codes = [c.code for c in columns if c.dtype == TEXT]
-    if text_codes:
-        df = df.with_columns(pl.col(text_codes).fill_null(""))
-    return df.rename({code: LABELS[code] for code in df.columns})
 
 
 # ---------- итоги ----------
@@ -162,38 +136,34 @@ if result is None:
 
 show_file_check(result)
 
-# Строка над итогами: слева — сколько строк показано, справа — кнопка «Фильтры».
-info_col, button_col = st.columns([8, 2], vertical_alignment="center")
-with button_col:
-    with st.container(horizontal_alignment="right"):
-        view = ops.ViewSettings(filters=filters_button(result.df, result.columns))
-shown = ops.apply_view(result.df, view)
+# Фильтры и сортировку пользователь задаёт в заголовках таблицы (как в Excel).
+table_view = current_view()
+view = ops.ViewSettings(
+    filters=table_view.filters, sort_by=table_view.sort_by, descending=table_view.descending
+)
+filtered = ops.apply_filters(result.df, view.filters)
 
 if view.filters:
-    info_col.markdown(
-        f"**Показано строк: {shown.height} из {result.df.height}.** Фильтры: "
+    st.markdown(
+        f"**Показано строк: {filtered.height} из {result.df.height}.** Фильтры: "
         + "; ".join(ops.describe_filters(view.filters, ops.format_value))
     )
 else:
-    info_col.markdown(f"**Показаны все строки: {shown.height}.**")
+    st.markdown(f"**Показаны все строки: {filtered.height}.**")
 
-view.totals = totals_block(shown, result.columns)
+view.totals = totals_block(filtered, result.columns)
 
-if shown.height > MAX_ROWS_ON_SCREEN:
-    st.caption(
-        f"В таблице показаны первые {MAX_ROWS_ON_SCREEN:,} строк из {shown.height:,}. "
-        "Итоги посчитаны по всем строкам.".replace(",", " ")
-    )
-st.dataframe(
-    for_screen(shown.head(MAX_ROWS_ON_SCREEN), result.columns),
-    column_config=column_config(result.columns),
-    width="stretch",
-    hide_index=True,
-    height="stretch",
+show_table(
+    result.df,
+    filtered,
+    result.columns,
+    table_view,
+    key=f"table_{uploaded.file_id}",
+    height=TABLE_HEIGHT,
 )
 st.caption(
-    "Сортировка — щелчок по заголовку колонки. "
-    "Кнопка ⛶ появляется над таблицей при наведении мыши и открывает её на весь экран."
+    "Фильтр — кнопка ▾ в заголовке колонки. Сортировка — щелчок по названию колонки "
+    "(по возрастанию → по убыванию → как в файле)."
 )
 
 # Текущие настройки пригодятся для выгрузки и пресетов на следующих этапах.

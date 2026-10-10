@@ -12,12 +12,18 @@ from typing import Any
 
 import polars as pl
 
-from app.schema import ATTRIBUTE, BY_CODE, DATE, MEASURE, NUMBER, RATIO, Column
+from app.schema import BY_CODE, DATE, MEASURE, NUMBER, RATIO, Column
 
 # Виды фильтров
-VALUES = "values"  # выбор значений из списка
+VALUES = "values"  # галочки у значений из списка
 RANGE = "range"  # от и до (числа, даты)
-CONTAINS = "contains"  # текст содержит подстроку (для описаний и комментариев)
+MONTHS = "months"  # галочки у месяцев по годам, как в Excel; значения вида "2026-01"
+CONTAINS = "contains"  # текст содержит подстроку (когда разных значений слишком много)
+
+MONTH_NAMES = (
+    "январь", "февраль", "март", "апрель", "май", "июнь",
+    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+)
 
 # Колонки для расчёта маржи % по итогам: сумма МП / сумма выручки.
 MARGIN_PCT, MARGIN_RUB, REVENUE = "margin_pct", "margin_rub", "revenue"
@@ -26,8 +32,9 @@ MARGIN_PCT, MARGIN_RUB, REVENUE = "margin_pct", "margin_rub", "revenue"
 @dataclass
 class Filter:
     code: str  # колонка
-    kind: str  # VALUES, RANGE или CONTAINS
-    values: list = field(default_factory=list)  # для VALUES; None в списке = пустые ячейки
+    kind: str  # VALUES, RANGE, MONTHS или CONTAINS
+    # Для VALUES и MONTHS — отмеченные значения; None в списке = пустые ячейки.
+    values: list = field(default_factory=list)
     low: Any = None  # для RANGE; None = без нижней границы
     high: Any = None  # для RANGE; None = без верхней границы
     text: str = ""  # для CONTAINS
@@ -44,13 +51,11 @@ class ViewSettings:
 
 
 def filter_kind(col: Column) -> str:
-    """Какой фильтр подходит колонке."""
+    """Какой фильтр подходит колонке: даты — по месяцам, суммы — диапазон, остальное — галочки."""
     if col.dtype == DATE:
-        return RANGE
+        return MONTHS
     if col.dtype == NUMBER and col.role in (MEASURE, RATIO):
         return RANGE
-    if col.role == ATTRIBUTE:
-        return CONTAINS
     return VALUES
 
 
@@ -75,14 +80,16 @@ def apply_filters(df: pl.DataFrame, filters: list[Filter]) -> pl.DataFrame:
 def filter_condition(f: Filter) -> pl.Expr | None:
     """Условие polars для одного фильтра. None — фильтр ничего не ограничивает."""
     col = pl.col(f.code)
-    if f.kind == VALUES:
+    if f.kind in (VALUES, MONTHS):
         if not f.values:
             return None
+        if f.kind == MONTHS:
+            col = col.dt.strftime("%Y-%m")
         chosen = [v for v in f.values if v is not None]
         cond = col.is_in(chosen) if chosen else pl.lit(False)
         if None in f.values:
             cond = cond | col.is_null()
-        return cond
+        return cond.fill_null(False)
     if f.kind == RANGE:
         parts = []
         if f.low is not None:
@@ -168,6 +175,42 @@ def value_range(df: pl.DataFrame, code: str) -> tuple[Any, Any]:
     return col.min(), col.max()
 
 
+def rows_for_options(df: pl.DataFrame, filters: list[Filter], code: str) -> pl.DataFrame:
+    """Строки, из которых берутся значения для окна фильтра колонки code.
+
+    Как в Excel: учитываются фильтры всех других колонок, но не фильтр самой колонки,
+    иначе снятые галочки пропали бы из списка и их нельзя было бы вернуть.
+    """
+    return apply_filters(df, [f for f in filters if f.code != code])
+
+
+def month_options(df: pl.DataFrame, code: str) -> list[dict]:
+    """Годы и месяцы, которые есть в колонке дат: [{"year": 2026, "months": [1, 2, ...]}, ...]."""
+    col = pl.col(code)
+    pairs = (
+        df.select(col.dt.year().alias("y"), col.dt.month().alias("m"))
+        .drop_nulls()
+        .unique()
+        .sort("y", "m")
+    )
+    years: dict[int, list[int]] = {}
+    for y, m in pairs.iter_rows():
+        years.setdefault(y, []).append(m)
+    return [{"year": y, "months": ms} for y, ms in years.items()]
+
+
+def describe_months(values: list) -> str:
+    """["2026-01", "2026-02", None] -> 'январь 2026, февраль 2026, (пусто)'."""
+    parts = []
+    for v in values:
+        if v is None:
+            parts.append("(пусто)")
+        else:
+            year, month = v.split("-")
+            parts.append(f"{MONTH_NAMES[int(month) - 1]} {year}")
+    return ", ".join(parts)
+
+
 def describe_filters(filters: list[Filter], fmt=str) -> list[str]:
     """Фильтры словами: «Статус заказа: Поставлено, Заявка». fmt(code, value) форматирует значение."""
     lines = []
@@ -176,6 +219,8 @@ def describe_filters(filters: list[Filter], fmt=str) -> list[str]:
         if f.kind == VALUES and f.values:
             shown = ", ".join("(пусто)" if v is None else fmt(f.code, v) for v in f.values)
             lines.append(f"{label}: {shown}")
+        elif f.kind == MONTHS and f.values:
+            lines.append(f"{label}: {describe_months(f.values)}")
         elif f.kind == RANGE and (f.low is not None or f.high is not None):
             parts = []
             if f.low is not None:

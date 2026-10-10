@@ -7,7 +7,7 @@ import pytest
 
 from app import ops
 from app.loader import load
-from app.ops import CONTAINS, RANGE, VALUES, Filter, ViewSettings
+from app.ops import CONTAINS, MONTHS, RANGE, VALUES, Filter, ViewSettings
 from app.schema import BY_CODE
 from tests.conftest import SAMPLE
 
@@ -132,9 +132,37 @@ def test_format_number():
 def test_filter_kinds():
     assert ops.filter_kind(BY_CODE["order_status"]) == VALUES
     assert ops.filter_kind(BY_CODE["probability"]) == VALUES
+    assert ops.filter_kind(BY_CODE["description"]) == VALUES
     assert ops.filter_kind(BY_CODE["revenue"]) == RANGE
-    assert ops.filter_kind(BY_CODE["revenue_date"]) == RANGE
-    assert ops.filter_kind(BY_CODE["description"]) == CONTAINS
+    assert ops.filter_kind(BY_CODE["margin_pct"]) == RANGE
+    assert ops.filter_kind(BY_CODE["revenue_date"]) == MONTHS
+
+
+def test_months_filter(df):
+    f = Filter("revenue_date", MONTHS, values=["2026-01", "2026-03"])
+    assert rows(ops.apply_filters(df, [f])) == [3, 5]
+    f = Filter("revenue_date", MONTHS, values=["2026-05", None])
+    assert rows(ops.apply_filters(df, [f])) == [6, 7]
+
+
+def test_month_options(df):
+    assert ops.month_options(df, "revenue_date") == [{"year": 2026, "months": [1, 2, 3, 5]}]
+
+
+def test_options_ignore_own_filter(df):
+    """Как в Excel: в списке колонки видны значения с учётом фильтров других колонок, но не своего."""
+    filters = [
+        Filter("order_status", VALUES, values=["Поставлено"]),
+        Filter("revenue_date", MONTHS, values=["2026-01"]),
+    ]
+    own = ops.rows_for_options(df, filters, "order_status")
+    assert ops.distinct_values(own, "order_status") == ["Поставлено"]  # только строки января
+    dates = ops.rows_for_options(df, filters, "revenue_date")
+    assert rows(dates) == [3, 6]  # все «Поставлено», любые месяцы
+
+
+def test_describe_months():
+    assert ops.describe_months(["2026-01", "2027-12", None]) == "январь 2026, декабрь 2027, (пусто)"
 
 
 def test_on_sample():
