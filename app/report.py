@@ -28,6 +28,8 @@ from datetime import date
 
 import polars as pl
 
+from app.schema import BY_CODE
+
 DELIVERED = "Поставлено"
 PROB_CONTRACTED = 1.0
 PROB_HIGH = 0.5
@@ -334,8 +336,41 @@ def detail_slide(df: pl.DataFrame, mvz: str) -> DetailSlide:
     return DetailSlide(f'Детализация контрактации по МВЗ "{mvz}"', rows)
 
 
+# Колонки, без которых презентацию не посчитать. Скрытые в Excel колонки loader пропускает,
+# поэтому какой-то из них может не быть.
+NEEDED = [
+    "year", "month", "mvz", "description", "customer", "order_status", "manager",
+    "probability", "revenue", "margin_rub", "contract_month", "contract_status_short",
+]  # fmt: skip
+
+
+def prepare(df: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
+    """Достраивает недостающие колонки. Возвращает таблицу и предупреждения для пользователя.
+
+    - Нет «ГОД» (B): год берётся из «Даты выручки» (O).
+    - Нет другой нужной колонки: она считается пустой, в отчёте по ней будут нули или пустые ячейки.
+    """
+    notes = []
+    if "year" not in df.columns and "revenue_date" in df.columns:
+        df = df.with_columns(pl.col("revenue_date").dt.year().cast(pl.Int64).alias("year"))
+        notes.append("Колонка B «ГОД» скрыта или отсутствует: год взят из колонки O «Дата выручки».")
+    missing = [code for code in NEEDED if code not in df.columns]
+    if missing:
+        df = df.with_columns(pl.lit(None).alias(code) for code in missing)
+        names = ", ".join(f"{BY_CODE[c].letter} «{BY_CODE[c].label}»" for c in missing)
+        notes.append(f"Нет колонок (скрыты в Excel?): {names}. В презентации они считаются пустыми.")
+    # Типы пустых колонок задаём явно, чтобы сравнения и суммы работали.
+    df = df.with_columns(
+        pl.col("year", "month", "contract_month").cast(pl.Int64),
+        pl.col("probability", "revenue", "margin_rub").cast(pl.Float64),
+        pl.col("mvz", "description", "customer", "order_status", "manager", "contract_status_short").cast(pl.String),
+    )
+    return df, notes
+
+
 def build_report(df: pl.DataFrame, params: ReportParams, customers: int = CUSTOMERS_ON_SLIDE) -> Report:
     """Все цифры презентации. df — строки листа после фильтров на сайте."""
+    df, _ = prepare(df)
     mvz = mvz_list(df)
     summaries = [company_slide(df, params, mvz)]
     summaries += [mvz_slide(df, params, m, customers) for m in mvz]

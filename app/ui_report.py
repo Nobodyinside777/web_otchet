@@ -11,7 +11,7 @@ from pathlib import Path
 import polars as pl
 import streamlit as st
 
-from app.report import Plan, ReportParams, build_report, mvz_list
+from app.report import Plan, ReportParams, build_report, mvz_list, prepare
 from app.report_pptx import build_pptx
 
 # Плановые цифры вводятся раз в год. Запоминаем их рядом с программой, чтобы не вводить каждый раз.
@@ -100,7 +100,10 @@ def report_block(shown: pl.DataFrame, filters_text: list[str]) -> None:
             st.info("После фильтров не осталось строк — презентацию собрать не из чего.")
             return
 
-        mvz = mvz_list(shown)
+        prepared, notes = prepare(shown)
+        for note in notes:
+            st.warning(note)
+        mvz = mvz_list(prepared)
         scope = "все строки файла" if not filters_text else "строки после фильтров: " + "; ".join(filters_text)
         st.markdown(
             f"Отчёт строится по показанным строкам ({scope}). "

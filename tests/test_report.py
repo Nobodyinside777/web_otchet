@@ -166,3 +166,29 @@ def test_template_has_no_texts_or_names():
     assert "<dc:creator></dc:creator>" in core or "<dc:creator/>" in core
     assert "TitlesOfParts" not in z.read("docProps/app.xml").decode("utf-8")
     assert not [n for n in z.namelist() if "author" in n.lower() or "comment" in n.lower()]
+
+
+def test_hidden_year_taken_from_revenue_date(df, params):
+    """Колонка «ГОД» скрыта в Excel: год берётся из «Даты выручки», остальное считается как обычно."""
+    with_dates = df.with_columns(pl.date(pl.col("year"), pl.col("month"), 1).alias("revenue_date"))
+    full = build_report(with_dates, params)
+    hidden = build_report(with_dates.drop("year"), params)
+    assert hidden.summaries[0].kpi[0].values() == full.summaries[0].kpi[0].values()
+    assert [r.values for r in hidden.summaries[0].plan] == [r.values for r in full.summaries[0].plan]
+
+
+def test_missing_columns_do_not_break_report(df, params):
+    from app.report import prepare
+
+    data = df.drop("manager", "contract_status_short")
+    _, notes = prepare(data)
+    assert len(notes) == 1 and "L «Ответственный»" in notes[0]
+    report = build_report(data, params)
+    assert report.details[1].rows[0][4:] == ["", ""]
+
+
+def test_sample_with_hidden_columns_like_real_file():
+    """Как в настоящем файле: скрыты B, V, W, X, Z."""
+    df = load(SAMPLE).df.drop("year", "contract_date", "cost2", "margin_rub2", "passes_threshold")
+    report = build_report(df, ReportParams(date(2026, 10, 10)))
+    Presentation(io.BytesIO(build_pptx(report)))
