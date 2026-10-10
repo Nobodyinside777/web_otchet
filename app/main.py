@@ -13,6 +13,7 @@ from app import ops  # noqa: E402
 from app.loader import LoadResult, load  # noqa: E402
 from app.schema import BY_CODE, DATE, LABELS, MEASURE, TEXT, Column  # noqa: E402
 from app.ui_filters import filters_button, reset_filters  # noqa: E402
+from app.ui_report import report_block  # noqa: E402
 from app.validate import FormatError, hidden_columns_message  # noqa: E402
 
 # Больше строк браузер показывает медленно. Итоги всё равно считаются по всем строкам.
@@ -195,6 +196,8 @@ st.caption(
     "Сортировка — щелчок по заголовку колонки. "
     "Кнопка ⛶ появляется над таблицей при наведении мыши и открывает её на весь экран."
 )
+
+report_block(shown, ops.describe_filters(view.filters, ops.format_value))
 
 # Текущие настройки пригодятся для выгрузки и пресетов на следующих этапах.
 st.session_state["view"] = view
