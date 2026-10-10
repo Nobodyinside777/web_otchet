@@ -30,17 +30,14 @@ echo Installing libraries, this takes a couple of minutes ...
 if errorlevel 1 goto fail
 copy /y requirements.txt .venv\requirements.installed >nul
 
-rem --- 3. Start: the browser opens as soon as the server is ready ---
+rem --- 3. Close every copy of the app that is already running (from any folder) ---
+rem Stops python processes "streamlit run ...app\main.py" and whatever listens on port 8501,
+rem then waits until the port is free.
 :start
-netstat -ano | findstr /c:"127.0.0.1:8501" | findstr LISTENING >nul
-if errorlevel 1 goto launch
-echo.
-echo The app is already running in another window (port 8501).
-echo Close that window first if you want to start a fresh copy, then run run.bat again.
-echo.
-pause
-exit /b 1
+echo Closing previously started copies of the app, if any ...
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -like '*streamlit*' -and $_.CommandLine -like '*app*main.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; for ($i = 0; $i -lt 20; $i++) { if (-not (Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue)) { break }; Start-Sleep -Milliseconds 500 }"
 
+rem --- 4. Start: the browser opens as soon as the server is ready ---
 :launch
 echo.
 echo The app is starting: %URL%
