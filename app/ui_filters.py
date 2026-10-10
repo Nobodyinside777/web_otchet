@@ -1,4 +1,4 @@
-"""Боковая панель с фильтрами. Возвращает список ops.Filter, саму фильтрацию делает ops."""
+"""Окно с фильтрами. Возвращает список ops.Filter, саму фильтрацию делает ops."""
 
 from datetime import date
 
@@ -16,9 +16,16 @@ def reset_filters() -> None:
         del st.session_state[key]
 
 
-def filters_sidebar(df: pl.DataFrame, columns: list[Column]) -> list[ops.Filter]:
-    st.sidebar.header("Фильтры")
-    chosen = st.sidebar.multiselect(
+def filters_button(df: pl.DataFrame, columns: list[Column]) -> list[ops.Filter]:
+    """Маленькая кнопка «Фильтры»; по нажатию открывается окно с фильтрами."""
+    active = len(st.session_state.get(KEY_PREFIX + "columns", []))
+    label = f"Фильтры ({active})" if active else "Фильтры"
+    with st.popover(label, icon=":material/filter_list:"):
+        return _filters_form(df, columns)
+
+
+def _filters_form(df: pl.DataFrame, columns: list[Column]) -> list[ops.Filter]:
+    chosen = st.multiselect(
         "Фильтровать по колонкам",
         options=[c.code for c in columns],
         format_func=lambda code: BY_CODE[code].label,
@@ -39,13 +46,13 @@ def filters_sidebar(df: pl.DataFrame, columns: list[Column]) -> list[ops.Filter]
             filters.append(f)
 
     if chosen:
-        st.sidebar.button("Сбросить все фильтры", on_click=reset_filters)
+        st.button("Сбросить все фильтры", on_click=reset_filters)
     return filters
 
 
 def _values_widget(df: pl.DataFrame, col: Column) -> ops.Filter | None:
     options = ops.distinct_values(df, col.code)
-    selected = st.sidebar.multiselect(
+    selected = st.multiselect(
         col.label,
         options=options,
         format_func=lambda v: ops.format_value(col.code, v),
@@ -58,11 +65,11 @@ def _values_widget(df: pl.DataFrame, col: Column) -> ops.Filter | None:
 def _range_widget(df: pl.DataFrame, col: Column) -> ops.Filter | None:
     low, high = ops.value_range(df, col.code)
     if low is None:
-        st.sidebar.caption(f"{col.label}: в колонке нет значений")
+        st.caption(f"{col.label}: в колонке нет значений")
         return None
 
     if col.dtype == DATE:
-        picked = st.sidebar.date_input(
+        picked = st.date_input(
             col.label,
             value=(low, high),
             min_value=date(1990, 1, 1),
@@ -76,8 +83,8 @@ def _range_widget(df: pl.DataFrame, col: Column) -> ops.Filter | None:
         new_low, new_high = picked
     else:
         scale = 100.0 if col.percent else 1.0  # доли вводим в процентах
-        unit = ", %" if col.percent else ""
-        c1, c2 = st.sidebar.columns(2)
+        unit = ", %" if col.percent and not col.label.endswith("%") else ""
+        c1, c2 = st.columns(2)
         new_low = c1.number_input(
             f"{col.label}{unit}: от", value=float(low) * scale, key=f"{KEY_PREFIX}{col.code}_low"
         ) / scale
@@ -105,5 +112,5 @@ def _same_or_wider(picked, edge, below: bool) -> bool:
 
 
 def _contains_widget(col: Column) -> ops.Filter | None:
-    text = st.sidebar.text_input(f"{col.label} содержит", key=f"{KEY_PREFIX}{col.code}")
+    text = st.text_input(f"{col.label} содержит", key=f"{KEY_PREFIX}{col.code}")
     return ops.Filter(col.code, ops.CONTAINS, text=text) if text.strip() else None

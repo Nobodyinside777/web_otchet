@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import ops  # noqa: E402
 from app.loader import LoadResult, load  # noqa: E402
 from app.schema import BY_CODE, DATE, LABELS, MEASURE, TEXT, Column  # noqa: E402
-from app.ui_filters import filters_sidebar, reset_filters  # noqa: E402
+from app.ui_filters import filters_button, reset_filters  # noqa: E402
 from app.validate import FormatError, hidden_columns_message  # noqa: E402
 
 # Больше строк браузер показывает медленно. Итоги всё равно считаются по всем строкам.
@@ -91,18 +91,6 @@ def for_screen(df: pl.DataFrame, columns: list[Column]) -> pl.DataFrame:
     return df.rename({code: LABELS[code] for code in df.columns})
 
 
-def sort_controls(columns: list[Column]) -> tuple[str | None, bool]:
-    c1, c2, _ = st.columns([3, 2, 5], vertical_alignment="bottom")
-    by = c1.selectbox(
-        "Сортировать по",
-        options=[None] + [c.code for c in columns],
-        format_func=lambda code: "без сортировки (как в файле)" if code is None else BY_CODE[code].label,
-        key="view_sort_by",
-    )
-    descending = c2.toggle("по убыванию", key="view_descending", disabled=by is None)
-    return by, descending
-
-
 # ---------- итоги ----------
 
 
@@ -174,17 +162,20 @@ if result is None:
 
 show_file_check(result)
 
-view = ops.ViewSettings(filters=filters_sidebar(result.df, result.columns))
-view.sort_by, view.descending = sort_controls(result.columns)
+# Строка над итогами: слева — сколько строк показано, справа — кнопка «Фильтры».
+info_col, button_col = st.columns([8, 2], vertical_alignment="center")
+with button_col:
+    with st.container(horizontal_alignment="right"):
+        view = ops.ViewSettings(filters=filters_button(result.df, result.columns))
 shown = ops.apply_view(result.df, view)
 
 if view.filters:
-    st.markdown(
+    info_col.markdown(
         f"**Показано строк: {shown.height} из {result.df.height}.** Фильтры: "
         + "; ".join(ops.describe_filters(view.filters, ops.format_value))
     )
 else:
-    st.markdown(f"**Показаны все строки: {shown.height}.**")
+    info_col.markdown(f"**Показаны все строки: {shown.height}.**")
 
 view.totals = totals_block(shown, result.columns)
 
@@ -193,18 +184,17 @@ if shown.height > MAX_ROWS_ON_SCREEN:
         f"В таблице показаны первые {MAX_ROWS_ON_SCREEN:,} строк из {shown.height:,}. "
         "Итоги посчитаны по всем строкам.".replace(",", " ")
     )
-with st.container(height=TABLE_HEIGHT, border=False):
-    # Высота «stretch» внутри контейнера: на странице таблица занимает TABLE_HEIGHT,
-    # а в полноэкранном режиме растягивается на весь экран (с фиксированной высотой
-    # она обрывалась на середине).
-    st.dataframe(
-        for_screen(shown.head(MAX_ROWS_ON_SCREEN), result.columns),
-        column_config=column_config(result.columns),
-        width="stretch",
-        hide_index=True,
-        height="stretch",
-    )
-st.caption("Сортировать можно и щелчком по заголовку колонки. Кнопка ⛶ над таблицей открывает её на весь экран.")
+st.dataframe(
+    for_screen(shown.head(MAX_ROWS_ON_SCREEN), result.columns),
+    column_config=column_config(result.columns),
+    width="stretch",
+    hide_index=True,
+    height="stretch",
+)
+st.caption(
+    "Сортировка — щелчок по заголовку колонки. "
+    "Кнопка ⛶ появляется над таблицей при наведении мыши и открывает её на весь экран."
+)
 
 # Текущие настройки пригодятся для выгрузки и пресетов на следующих этапах.
 st.session_state["view"] = view
