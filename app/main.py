@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import ops  # noqa: E402
 from app.loader import LoadResult, load  # noqa: E402
 from app.schema import BY_CODE, Column  # noqa: E402
+from app.ui_report import report_block  # noqa: E402
 from app.ui_table import current_view, reset_view, show_table  # noqa: E402
 from app.validate import FormatError, hidden_columns_message  # noqa: E402
 
@@ -165,6 +166,8 @@ st.caption(
     "Фильтр — кнопка ▾ в заголовке колонки. Сортировка — щелчок по названию колонки "
     "(по возрастанию → по убыванию → как в файле)."
 )
+
+report_block(filtered, ops.describe_filters(view.filters, ops.format_value))
 
 # Текущие настройки пригодятся для выгрузки и пресетов на следующих этапах.
 st.session_state["view"] = view
